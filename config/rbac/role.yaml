@@ -1,0 +1,33 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  creationTimestamp: null
+  name: manager-role
+rules:
+- apiGroups:
+  - cache.atlassian.com
+  resources:
+  - cachebackuprequests
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - cache.atlassian.com
+  resources:
+  - cachebackuprequests/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - cache.atlassian.com
+  resources:
+  - cachebackuprequests/status
+  verbs:
+  - get
+  - patch
+  - update

@@ -1,0 +1,27 @@
+# permissions for end users to view cachebackuprequests.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: clusterrole
+    app.kubernetes.io/instance: cachebackuprequest-viewer-role
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/created-by: dc-cache-backup-operator
+    app.kubernetes.io/part-of: dc-cache-backup-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: cachebackuprequest-viewer-role
+rules:
+- apiGroups:
+  - cache.atlassian.com
+  resources:
+  - cachebackuprequests
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - cache.atlassian.com
+  resources:
+  - cachebackuprequests/status
+  verbs:
+  - get
