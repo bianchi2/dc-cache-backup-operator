@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: confluence-pvc-prewarmer-operator
+  labels:
+    k8s-app: confluence-pvc-prewarmer-operator
+spec:
+  selector:
+    matchLabels:
+      k8s-app: confluence-pvc-prewarmer-operator
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        k8s-app: confluence-pvc-prewarmer-operator
+    spec:
+      securityContext:
+        runAsNonRoot: true
+      containers:
+      - command:
+        - /manager
+        args:
+        - --leader-elect
+        image: eivantsov/index-prewar-operator:0.0.1
+        name: operator
+        imagePullPolicy: Always
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - "ALL"
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 500m
+            memory: 128Mi
+          requests:
+            cpu: 10m
+            memory: 64Mi
+      serviceAccountName: index-manager
+      terminationGracePeriodSeconds: 10

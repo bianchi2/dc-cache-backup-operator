@@ -29,7 +29,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"strconv"
-	"sync"
 	"time"
 )
 
@@ -115,18 +114,17 @@ func (r *CacheBackupRequestReconciler) Reconcile(ctx context.Context, req ctrl.R
 		return reconcile.Result{}, err
 	}
 
+	// create a channel for receiving pod status updates
 	statusChan := make(chan string)
-	var wg sync.WaitGroup
-	wg.Add(1)
 
 	go func() {
-		defer wg.Done()
 		status, err := k8s.WatchPodStatus(pod.Name, pod.Namespace)
 		if err != nil {
 			log.Error(err, "Error watching pod status")
 			return
 		}
 		statusChan <- status
+		log.Info("WatchPodStatus called x times")
 	}()
 
 	select {
@@ -158,7 +156,6 @@ func (r *CacheBackupRequestReconciler) Reconcile(ctx context.Context, req ctrl.R
 		// keeping failed pods will result in no more pre-warmer pods being created
 		// until the faulty pod is manually deleted (after examining logs)
 		if status == string(corev1.PodSucceeded) {
-
 			pod := k8s.GetRuntimePreWarmerPod(pod)
 			indexRestoreDuration := int(time.Since(pod.ObjectMeta.CreationTimestamp.Time).Seconds())
 			currentTime := time.Now()
@@ -180,17 +177,14 @@ func (r *CacheBackupRequestReconciler) Reconcile(ctx context.Context, req ctrl.R
 			if err != nil {
 				return ctrl.Result{RequeueAfter: 1 * time.Second}, err
 			}
-			return ctrl.Result{
-				RequeueAfter: 30 * time.Second}, nil
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 		}
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 
 		// this shouldn't happen - a pod should have at least some status
 		// unless pod creation ended with failure
 	case <-time.After(5 * time.Minute):
 		log.Info("Timed out waiting for pod status")
 	}
-	wg.Wait()
 	return ctrl.Result{RequeueAfter: 1 * time.Second}, nil
 }
 
