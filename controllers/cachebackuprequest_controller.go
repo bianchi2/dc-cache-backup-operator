@@ -17,27 +17,28 @@ limitations under the License.
 package controllers
 
 import (
+	cachev1beta1 "bianchi2/dc-cache-backup-operator/api/v1beta1"
 	"bianchi2/dc-cache-backup-operator/k8s"
+	"bianchi2/dc-cache-backup-operator/util"
 	"context"
-	"fmt"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"strconv"
+	"sync"
 	"time"
-
-	cachev1beta1 "bianchi2/dc-cache-backup-operator/api/v1beta1"
 )
+
+const dateFormatLayout = "2006-01-02 15:04:05 -0700"
 
 // CacheBackupRequestReconciler reconciles a CacheBackupRequest object
 type CacheBackupRequestReconciler struct {
 	client.Client
-	Scheme   *runtime.Scheme
-	lastSpec cachev1beta1.CacheBackupRequestSpec
+	Scheme *runtime.Scheme
 }
 
 //+kubebuilder:rbac:groups=cache.atlassian.com,resources=cachebackuprequests,verbs=get;list;watch;create;update;patch;delete
@@ -46,15 +47,11 @@ type CacheBackupRequestReconciler struct {
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the CacheBackupRequest object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
-//
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.13.0/pkg/reconcile
 func (r *CacheBackupRequestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = log.FromContext(ctx)
+
+	log := log.FromContext(ctx)
 
 	instance := &cachev1beta1.CacheBackupRequest{}
 	err := r.Client.Get(ctx, req.NamespacedName, instance)
@@ -69,60 +66,151 @@ func (r *CacheBackupRequestReconciler) Reconcile(ctx context.Context, req ctrl.R
 		return reconcile.Result{}, err
 	}
 
-	pvcs := &corev1.PersistentVolumeClaimList{}
-	selector := labels.SelectorFromSet(map[string]string{
-		"app.kubernetes.io/name": instance.Spec.InstanceName,
-	})
-	err = r.Client.List(ctx, pvcs, &client.ListOptions{
-		Namespace:     instance.Namespace,
-		LabelSelector: selector,
-	})
-	if err != nil {
-		return reconcile.Result{}, err
-	}
-
-	for _, pvc := range pvcs.Items {
-
-		if pvc.Name != "local-home-confluence-0" {
-			pod := k8s.GetNewPreWarmerPod(instance, pvc.Name)
-			err := r.Client.Create(ctx, pod)
-			if err != nil {
-				return reconcile.Result{}, err
+	pvcName := "local-home-" + instance.Spec.InstanceName + "-" + strconv.Itoa(instance.Spec.StatefulSetNumber)
+	exists, free, err := k8s.IsPVCExistsAndFree(instance, pvcName)
+	if !exists {
+		if instance.Spec.CreatePVC {
+			log.Info("PVC " + pvcName + " does not exist. Creating it because .spec.createPVC is " + strconv.FormatBool(instance.Spec.CreatePVC))
+			pvc := k8s.GetNewPVC(instance, pvcName)
+			err = r.Client.Create(ctx, pvc)
+			if err != nil && !errors.IsAlreadyExists(err) {
+				return reconcile.Result{RequeueAfter: 1 * time.Minute}, err
 			}
-
-			statusChan := make(chan string)
-			go func() {
-				status, err := k8s.WatchPodStatus(pod.Name, pod.Namespace)
-				if err != nil {
-					fmt.Printf("Error watching pod status: %v\n", err)
-					return
-				}
-				statusChan <- status
-			}()
-
-			select {
-			case status := <-statusChan:
-				fmt.Printf("Pod %s status: %s\n", pod.Name, status)
-				currentTime := time.Now()
-
-				instance.Status.PVCStatus = []cachev1beta1.PVCStatus{
-					{
-						PVCName:             pvc.Name,
-						Status:              status,
-						LastTransactionTime: currentTime.Format("2006-01-02 15:04:05"),
-					},
-				}
-				err := r.Client.Status().Update(ctx, instance)
-				if err != nil {
-					return reconcile.Result{}, err
-				}
-			case <-time.After(10 * time.Minute):
-				fmt.Printf("Timed out waiting for pod status\n")
+		} else {
+			log.Error(err, "PVC does not exist")
+			crStatus := &cachev1beta1.CacheBackupRequestStatus{
+				PVCName:                     pvcName,
+				Status:                      "PVCDoesNotExist",
+				LastTransactionTime:         time.Now().Format(dateFormatLayout),
+				IndexRestoreDurationSeconds: 0,
+			}
+			err := r.UpdateStatus(ctx, req, crStatus)
+			if err != nil {
+				return reconcile.Result{RequeueAfter: 1 * time.Minute}, nil
 			}
 		}
 	}
 
-	return ctrl.Result{RequeueAfter: 10 * time.Minute}, nil
+	if !free {
+		// this isn't really a reconciliation error but rather one of the expected scenarios
+		// so we requeue and try again later
+		if instance.Status.Status == string(corev1.PodRunning) || instance.Status.Status == string(corev1.PodPending) {
+		} else {
+			log.Info("PVC " + pvcName + " is bound to PV that is currently used by a running pod. Waiting 1 minute...")
+			return reconcile.Result{RequeueAfter: 1 * time.Minute}, nil
+
+		}
+	}
+
+	if len(instance.Status.LastTransactionTime) > 0 {
+		runBackup, err := util.IsBackupOutdated(instance)
+		if err != nil || !runBackup {
+			return ctrl.Result{RequeueAfter: 65 * time.Second}, nil
+		}
+	}
+
+	pod := k8s.GetNewPreWarmerPod(instance, pvcName)
+	err = r.Client.Create(ctx, pod)
+	if err != nil && !errors.IsAlreadyExists(err) {
+		return reconcile.Result{}, err
+	}
+
+	statusChan := make(chan string)
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	go func() {
+		defer wg.Done()
+		status, err := k8s.WatchPodStatus(pod.Name, pod.Namespace)
+		if err != nil {
+			log.Error(err, "Error watching pod status")
+			return
+		}
+		statusChan <- status
+	}()
+
+	select {
+	case status := <-statusChan:
+		_ = r.Client.Get(ctx, req.NamespacedName, instance)
+
+		// skip updating the same status
+		if status != instance.Status.Status {
+			log.Info("Pod " + pod.Name + " status changed to " + status)
+			log.Info("Updating " + instance.Name + " status from " + instance.Status.Status + " to " + status)
+
+			currentTime := time.Now()
+			indexRestoreDuration := 0
+			crStatus := &cachev1beta1.CacheBackupRequestStatus{
+				PVCName:                     pvcName,
+				Status:                      status,
+				LastTransactionTime:         currentTime.Format(dateFormatLayout),
+				IndexRestoreDurationSeconds: indexRestoreDuration,
+			}
+
+			// update custom resource status
+			err := r.UpdateStatus(ctx, req, crStatus)
+			if err != nil {
+				return reconcile.Result{}, err
+			}
+		}
+
+		// we don't need a pod that has succeeded, so deleting it
+		// keeping failed pods will result in no more pre-warmer pods being created
+		// until the faulty pod is manually deleted (after examining logs)
+		if status == string(corev1.PodSucceeded) {
+
+			pod := k8s.GetRuntimePreWarmerPod(pod)
+			indexRestoreDuration := int(time.Since(pod.ObjectMeta.CreationTimestamp.Time).Seconds())
+			currentTime := time.Now()
+			// update custom resource status
+			crStatus := &cachev1beta1.CacheBackupRequestStatus{
+				PVCName:                     pvcName,
+				Status:                      status,
+				LastTransactionTime:         currentTime.Format(dateFormatLayout),
+				IndexRestoreDurationSeconds: indexRestoreDuration,
+			}
+
+			err := r.UpdateStatus(ctx, req, crStatus)
+			if err != nil {
+				return reconcile.Result{RequeueAfter: 1 * time.Second}, err
+			}
+
+			log.Info("Deleting pod " + pod.Name)
+			err = r.Client.Delete(ctx, pod)
+			if err != nil {
+				return ctrl.Result{RequeueAfter: 1 * time.Second}, err
+			}
+			return ctrl.Result{
+				RequeueAfter: 30 * time.Second}, nil
+		}
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+
+		// this shouldn't happen - a pod should have at least some status
+		// unless pod creation ended with failure
+	case <-time.After(5 * time.Minute):
+		log.Info("Timed out waiting for pod status")
+	}
+	wg.Wait()
+	return ctrl.Result{RequeueAfter: 1 * time.Second}, nil
+}
+
+func (r *CacheBackupRequestReconciler) UpdateStatus(ctx context.Context, req ctrl.Request, status *cachev1beta1.CacheBackupRequestStatus) (err error) {
+	instance := &cachev1beta1.CacheBackupRequest{}
+
+	var updateErr error
+	for i := 0; i < 5; i++ {
+		err = r.Client.Get(ctx, req.NamespacedName, instance)
+		instance.Status = *status
+		if err != nil {
+			return err
+		}
+		updateErr = r.Client.Status().Update(ctx, instance)
+		if updateErr == nil {
+			return nil
+		}
+		time.Sleep(1 * time.Second)
+	}
+	return updateErr
 }
 
 // SetupWithManager sets up the controller with the Manager.

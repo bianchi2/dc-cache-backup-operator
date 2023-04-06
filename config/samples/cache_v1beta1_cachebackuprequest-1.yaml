@@ -1,0 +1,36 @@
+apiVersion: cache.atlassian.com/v1beta1
+kind: CacheBackupRequest
+metadata:
+  labels:
+    app.kubernetes.io/name: cachebackuprequest
+    app.kubernetes.io/instance: local-home-1
+    app.kubernetes.io/part-of: dc-cache-backup-operator
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: dc-cache-backup-operator
+  name: local-home-1
+spec:
+  # Helm release name
+  instanceName: confluence
+  # Pod number in a StatefulSet to pre-warm
+  statefulSetNumber: 1
+  # How often run the pre-warming job
+  backupIntervalMinutes: 1
+  # ConfigMap with the script that copies/unpacks indexes
+  configMapName: copy-index
+
+  # shared-home
+  sharedHomePVCName: confluence-shared-home-pvc
+  sharedHomePath: /var/atlassian/application-data/shared-home
+
+  # local-home
+  localHomePath: /var/atlassian/application-data/confluence
+
+  # create PVC if missing
+  createPVC: false
+
+  # k8s
+  podLabels:
+    app: copy-index
+  podAnnotations:
+    app: copy-index
+

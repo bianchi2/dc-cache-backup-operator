@@ -42,31 +42,135 @@ spec:
                 description: SharedHomePVCName is the name of a shared home PVC that will be mounted
                 type: string
 
-              indexSnapshotsPath:
-                description: IndexSnapshotsPath is the destination path in the local-home volume to unpack indexes
+              localHomePath:
+                description: LocalHomePath is the local-home mount path
+                type: string
+
+              sharedHomePath:
+                description: SharedHome is the shared-home mount path
                 type: string
 
               instanceName:
                 type: string
                 description: Name of the Helm release, e.g. confluence, jira
 
+              statefulSetNumber:
+                type: integer
+                description: Number of the pod in the statefulset
+
+              backupIntervalMinutes:
+                type: integer
+                description: Interval between backups
+
+              configMapName:
+                type: string
+                description: ConfigMap with the script that copies/unpacks indexes
+
+              createPVC:
+                type: boolean
+                description: Create a new PVC if missing
+
+              pvcStorageRequest:
+                type: string
+                description: Local home PVC storage request in Gi
+
+              podLabels:
+                type: object
+                additionalProperties:
+                  type: string
+
+              podAnnotations:
+                type: object
+                additionalProperties:
+                  type: string
+
+              pvcLabels:
+                type: object
+                additionalProperties:
+                  type: string
+
+              pvcAnnotations:
+                type: object
+                additionalProperties:
+                  type: string
+
+              nodeSelector:
+                type: object
+                additionalProperties:
+                  type: string
+
+              tolerations:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    key:
+                      type: string
+                    operator:
+                      type: string
+                    value:
+                      type: string
+                    effect:
+                      type: string
+              affinity:
+                type: object
+                properties:
+                  nodeAffinity:
+                    type: object
+                    properties:
+                      requiredDuringSchedulingIgnoredDuringExecution:
+                        type: object
+                        properties:
+                          nodeSelectorTerms:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                matchExpressions:
+                                  type: array
+                                  items:
+                                    type: object
+                                    properties:
+                                      key:
+                                        type: string
+                                      operator:
+                                        type: string
+                                      values:
+                                        type: array
+                                        items:
+                                          type: string
+              topologySpreadConstraints:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    maxSkew:
+                      type: integer
+                    topologyKey:
+                      type: string
+                    whenUnsatisfiable:
+                      type: string
+                    labelSelector:
+                      type: object
+                      properties:
+                        matchLabels:
+                          type: object
+                          additionalProperties:
+                            type: string
+
             type: object
           status:
             description: CacheBackupRequestStatus defines the observed state of CacheBackupRequest
             type: object
             properties:
-              pvcStatus:
-                type: array
-                items:
-                  type: object
-                  properties:
-                    pvcName:
-                      type: string
-                    status:
-                      type: string
-                    lastTransactionTime:
-                      type: string
-                description: List of PVC status objects
+              pvcName:
+                type: string
+              status:
+                type: string
+              lastTransactionTime:
+                type: string
+              indexRestoreDurationSeconds:
+                type: number
         type: object
     served: true
     storage: true

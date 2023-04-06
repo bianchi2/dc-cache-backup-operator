@@ -17,6 +17,7 @@ limitations under the License.
 package v1beta1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -28,13 +29,30 @@ type CacheBackupRequestSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	SharedHomePVCName  string `json:"sharedHomePVCName,omitempty"`
-	IndexSnapshotsPath string `json:"indexSnapshotsPath,omitempty"`
-	InstanceName       string `json:"instanceName,omitempty"`
+	SharedHomePVCName     string            `json:"sharedHomePVCName,omitempty"`
+	IndexSnapshotsPath    string            `json:"indexSnapshotsPath,omitempty"`
+	SharedHomePath        string            `json:"sharedHomePath,omitempty"`
+	LocalHomePath         string            `json:"localHomePath,omitempty"`
+	InstanceName          string            `json:"instanceName,omitempty"`
+	StatefulSetNumber     int               `json:"statefulSetNumber,omitempty"`
+	BackupIntervalMinutes int               `json:"backupIntervalMinutes,omitempty"`
+	ConfigMapName         string            `json:"configMapName,omitempty"`
+	PVCLabels             map[string]string `json:"pvcLabels,omitempty"`
+	PVCAnnotations        map[string]string `json:"pvcAnnotations,omitempty"`
+
+	PodLabels                 map[string]string                 `json:"podLabels,omitempty"`
+	PodAnnotations            map[string]string                 `json:"podAnnotations,omitempty"`
+	NodeSelector              map[string]string                 `json:"nodeSelector,omitempty"`
+	Tolerations               []corev1.Toleration               `json:"tolerations,omitempty"`
+	Affinity                  corev1.Affinity                   `json:"affinity,omitempty"`
+	TopologySpreadConstraints []corev1.TopologySpreadConstraint `json:"topologySpreadConstraints,omitempty"`
+	CreatePVC                 bool                              `json:"createPVC,omitempty"`
+	PvcStorageRequest         string                            `json:"pvcStorageRequest,omitempty"`
 }
 
-// PVCStatus represents the status of a PVC
-type PVCStatus struct {
+// CacheBackupRequestStatus defines the observed state of CacheBackupRequest
+type CacheBackupRequestStatus struct {
+
 	// Name of the PVC
 	PVCName string `json:"pvcName,omitempty"`
 
@@ -43,12 +61,8 @@ type PVCStatus struct {
 
 	// Timestamp for last transaction
 	LastTransactionTime string `json:"lastTransactionTime,omitempty"`
-}
 
-// CacheBackupRequestStatus defines the observed state of CacheBackupRequest
-type CacheBackupRequestStatus struct {
-	// List of PVC status objects
-	PVCStatus []PVCStatus `json:"pvcStatus,omitempty"`
+	IndexRestoreDurationSeconds int `json:"indexRestoreDurationSeconds,omitempty"`
 }
 
 //+kubebuilder:object:root=true

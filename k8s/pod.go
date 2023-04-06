@@ -8,38 +8,72 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/clientcmd"
-	"os"
 	"time"
 )
 
+func GetRuntimePreWarmerPod(pod *corev1.Pod) *corev1.Pod {
+	config, err := util.GetKubeConfig()
+	if err != nil {
+		return nil
+	}
+	// Create a Kubernetes client
+	clientset, _ := kubernetes.NewForConfig(config)
+	pod, err = clientset.CoreV1().Pods(pod.Namespace).Get(context.TODO(), pod.Name, metav1.GetOptions{})
+	if err != nil {
+		return nil
+	}
+	return pod
+}
+
 // GetNewPreWarmerPod generates pre-warmer pod definition
 func GetNewPreWarmerPod(cr *cachev1beta1.CacheBackupRequest, localHomePVCName string) *corev1.Pod {
-	labels := map[string]string{
-		"pvc": localHomePVCName,
+	labels := cr.Spec.PodLabels
+	labels["pvc"] = localHomePVCName
+	if labels == nil {
+		labels = make(map[string]string)
 	}
+	defaultMode := int32(0755)
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      util.GenerateK8sCompliantName("prewarm-"+localHomePVCName, 7),
-			Namespace: cr.Namespace,
-			Labels:    labels,
+			Name:        "prewarm-" + localHomePVCName,
+			Namespace:   cr.Namespace,
+			Labels:      labels,
+			Annotations: cr.Spec.PodAnnotations,
 		},
 		Spec: corev1.PodSpec{
-			RestartPolicy: corev1.RestartPolicyNever,
+			RestartPolicy:             corev1.RestartPolicyNever,
+			Tolerations:               cr.Spec.Tolerations,
+			NodeSelector:              cr.Spec.NodeSelector,
+			TopologySpreadConstraints: cr.Spec.TopologySpreadConstraints,
+			Affinity:                  &cr.Spec.Affinity,
 			Containers: []corev1.Container{
 				{
 					Name:    "pre-warmer",
 					Image:   "atlassian/confluence:8.0.3",
-					Command: []string{"/bin/bash"},
-					Args:    []string{"-c", "sleep 5 && ls -la ${CONFLUENCE_HOME} && ls -la /var/atlassian/application-data/shared-home/index-snapshots"},
+					Command: []string{"/opt/script/copy-index.sh"},
+					Env: []corev1.EnvVar{
+						{
+							Name:  "SHARED_HOME",
+							Value: cr.Spec.SharedHomePath,
+						},
+						{
+							Name:  "LOCAL_HOME",
+							Value: cr.Spec.LocalHomePath,
+						},
+					},
+
 					VolumeMounts: []corev1.VolumeMount{
 						{
 							Name:      "local-home",
-							MountPath: "/var/atlassian/application-data/confluence",
+							MountPath: cr.Spec.LocalHomePath,
 						},
 						{
 							Name:      "shared-home",
-							MountPath: cr.Spec.IndexSnapshotsPath,
+							MountPath: cr.Spec.SharedHomePath,
+						},
+						{
+							Name:      "copy-index",
+							MountPath: "/opt/script",
 						},
 					},
 				},
@@ -61,6 +95,17 @@ func GetNewPreWarmerPod(cr *cachev1beta1.CacheBackupRequest, localHomePVCName st
 						},
 					},
 				},
+				{
+					Name: "copy-index",
+					VolumeSource: corev1.VolumeSource{
+						ConfigMap: &corev1.ConfigMapVolumeSource{
+							LocalObjectReference: corev1.LocalObjectReference{
+								Name: cr.Spec.ConfigMapName,
+							},
+							DefaultMode: &defaultMode,
+						},
+					},
+				},
 			},
 		},
 	}
@@ -68,17 +113,10 @@ func GetNewPreWarmerPod(cr *cachev1beta1.CacheBackupRequest, localHomePVCName st
 
 // WatchPodStatus watches a pod and returns its status
 func WatchPodStatus(podName, namespace string) (string, error) {
-	// Load Kubernetes configuration from the default location
-	fmt.Println("Starting watching pod " + podName)
-
-	kubeconfig := os.Getenv("KUBECONFIG")
-	//config, err := rest.InClusterConfig()
-	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
-
+	config, err := util.GetKubeConfig()
 	if err != nil {
-		return "", fmt.Errorf("error loading Kubernetes config: %v", err)
+		return "", fmt.Errorf("error creating Kubernetes client: %v", err)
 	}
-
 	// Create a Kubernetes client
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
@@ -103,7 +141,7 @@ func WatchPodStatus(podName, namespace string) (string, error) {
 		}
 		if pod.Name == podName {
 			switch pod.Status.Phase {
-			case corev1.PodSucceeded, corev1.PodFailed:
+			case corev1.PodPending, corev1.PodRunning, corev1.PodSucceeded, corev1.PodFailed:
 				return string(pod.Status.Phase), nil
 			}
 		}
