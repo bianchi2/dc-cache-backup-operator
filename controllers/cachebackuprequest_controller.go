@@ -24,6 +24,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -34,10 +35,17 @@ import (
 
 const dateFormatLayout = "2006-01-02 15:04:05 -0700"
 
+type TestSuite struct {
+	Test  bool
+	State string
+}
+
 // CacheBackupRequestReconciler reconciles a CacheBackupRequest object
 type CacheBackupRequestReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme    *runtime.Scheme
+	K8sClient kubernetes.Interface
+	Test      TestSuite
 }
 
 //+kubebuilder:rbac:groups=cache.atlassian.com,resources=cachebackuprequests,verbs=get;list;watch;create;update;patch;delete
@@ -66,7 +74,7 @@ func (r *CacheBackupRequestReconciler) Reconcile(ctx context.Context, req ctrl.R
 	}
 
 	pvcName := "local-home-" + instance.Spec.InstanceName + "-" + strconv.Itoa(instance.Spec.StatefulSetNumber)
-	exists, free, err := k8s.IsPVCExistsAndFree(instance, pvcName)
+	exists, free, err := k8s.IsPVCExistsAndFree(instance, pvcName, r.K8sClient)
 	if !exists {
 		if instance.Spec.CreatePVC {
 			log.Info("PVC " + pvcName + " does not exist. Creating it because .spec.createPVC is " + strconv.FormatBool(instance.Spec.CreatePVC))
@@ -87,6 +95,7 @@ func (r *CacheBackupRequestReconciler) Reconcile(ctx context.Context, req ctrl.R
 			if err != nil {
 				return reconcile.Result{RequeueAfter: 1 * time.Minute}, nil
 			}
+			return reconcile.Result{RequeueAfter: 1 * time.Minute}, nil
 		}
 	}
 
@@ -108,7 +117,7 @@ func (r *CacheBackupRequestReconciler) Reconcile(ctx context.Context, req ctrl.R
 		}
 	}
 
-	pod := k8s.GetNewPreWarmerPod(instance, pvcName)
+	pod := GetNewPreWarmerPod(instance, pvcName)
 	err = r.Client.Create(ctx, pod)
 	if err != nil && !errors.IsAlreadyExists(err) {
 		return reconcile.Result{}, err
@@ -118,13 +127,12 @@ func (r *CacheBackupRequestReconciler) Reconcile(ctx context.Context, req ctrl.R
 	statusChan := make(chan string)
 
 	go func() {
-		status, err := k8s.WatchPodStatus(pod.Name, pod.Namespace)
+		status, err := WatchPodStatus(pod.Name, pod.Namespace, r.K8sClient, r.Test.State)
 		if err != nil {
 			log.Error(err, "Error watching pod status")
 			return
 		}
 		statusChan <- status
-		log.Info("WatchPodStatus called x times")
 	}()
 
 	select {
@@ -156,7 +164,7 @@ func (r *CacheBackupRequestReconciler) Reconcile(ctx context.Context, req ctrl.R
 		// keeping failed pods will result in no more pre-warmer pods being created
 		// until the faulty pod is manually deleted (after examining logs)
 		if status == string(corev1.PodSucceeded) {
-			pod := k8s.GetRuntimePreWarmerPod(pod)
+			pod := r.GetRuntimePreWarmerPod(pod)
 			indexRestoreDuration := int(time.Since(pod.ObjectMeta.CreationTimestamp.Time).Seconds())
 			currentTime := time.Now()
 			// update custom resource status
@@ -180,8 +188,8 @@ func (r *CacheBackupRequestReconciler) Reconcile(ctx context.Context, req ctrl.R
 			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 		}
 
-		// this shouldn't happen - a pod should have at least some status
-		// unless pod creation ended with failure
+	// this shouldn't happen - a pod should have at least some status
+	// unless pod creation ended with failure
 	case <-time.After(5 * time.Minute):
 		log.Info("Timed out waiting for pod status")
 	}

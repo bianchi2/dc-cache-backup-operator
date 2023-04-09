@@ -14,7 +14,7 @@ spec:
   # Pod number in a StatefulSet to pre-warm
   statefulSetNumber: 1
   # How often run the pre-warming job
-  backupIntervalMinutes: 1
+  backupIntervalMinutes: 20
   # ConfigMap with the script that copies/unpacks indexes
   configMapName: copy-index
 
@@ -34,3 +34,7 @@ spec:
   podAnnotations:
     app: copy-index
 
+  podResources:
+    requests:
+      cpu: "1"
+      memory: 1024Mi

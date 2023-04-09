@@ -74,6 +74,40 @@ spec:
                 type: string
                 description: Local home PVC storage request in Gi
 
+              pvcStorageClass:
+                type: string
+                description: Local home PVC storage class
+
+              pvcVolumeMode:
+                type: string
+                description: Local home PVC volume mode
+
+              pvcLabelSelector:
+                type: object
+                properties:
+                  matchLabels:
+                    type: object
+                    additionalProperties:
+                      type: string
+
+              podResources:
+                type: object
+                properties:
+                  limits:
+                    type: object
+                    properties:
+                      cpu:
+                        type: string
+                      memory:
+                        type: string
+                  requests:
+                    type: object
+                    properties:
+                      cpu:
+                        type: string
+                      memory:
+                        type: string
+
               podLabels:
                 type: object
                 additionalProperties:

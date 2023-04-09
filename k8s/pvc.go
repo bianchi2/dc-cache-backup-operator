@@ -2,7 +2,6 @@ package k8s
 
 import (
 	cachev1beta1 "bianchi2/dc-cache-backup-operator/api/v1beta1"
-	"bianchi2/dc-cache-backup-operator/util"
 	"context"
 	"fmt"
 	corev1 "k8s.io/api/core/v1"
@@ -36,27 +35,28 @@ func GetNewPVC(cr *cachev1beta1.CacheBackupRequest, localHomePVCName string) *co
 					corev1.ResourceStorage: resource.MustParse(cr.Spec.PvcStorageRequest),
 				},
 			},
+			StorageClassName: &cr.Spec.PvcStorageClass,
+			Selector:         &cr.Spec.PvcLabelSelector,
+			VolumeName:       cr.Spec.PvcVolumeName,
+			VolumeMode:       (*corev1.PersistentVolumeMode)(&cr.Spec.PvcVolumeMode),
 		},
 	}
 }
 
 // IsPVCExistsAndFree returns PVC by name
-func IsPVCExistsAndFree(cr *cachev1beta1.CacheBackupRequest, localHomePVCName string) (exists bool, free bool, err error) {
+func IsPVCExistsAndFree(cr *cachev1beta1.CacheBackupRequest, localHomePVCName string, clientset kubernetes.Interface) (exists bool, free bool, err error) {
 
-	config, err := util.GetKubeConfig()
 	if err != nil {
-		return false, false, fmt.Errorf("error creating Kubernetes client: %v", err)
-	}
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		return false, false, fmt.Errorf("error creating Kubernetes client: %v", err)
+		return false, false, err
 	}
 
+	// check if PVC exists
 	pvc, err := clientset.CoreV1().PersistentVolumeClaims(cr.Namespace).Get(context.TODO(), localHomePVCName, metav1.GetOptions{})
 	if err != nil || pvc == nil {
 		return false, true, fmt.Errorf("PVC does not exist: %v", localHomePVCName)
 	}
 
+	// get all pods by label selector and check if PVC is used as volume source in volumes
 	pods := &corev1.PodList{}
 	pods, err = clientset.CoreV1().Pods(cr.Namespace).List(context.TODO(), metav1.ListOptions{LabelSelector: "app.kubernetes.io/name=" + cr.Spec.InstanceName})
 

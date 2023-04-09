@@ -1,24 +1,17 @@
-package k8s
+package controllers
 
 import (
 	cachev1beta1 "bianchi2/dc-cache-backup-operator/api/v1beta1"
-	"bianchi2/dc-cache-backup-operator/util"
 	"context"
 	"fmt"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
-	"time"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func GetRuntimePreWarmerPod(pod *corev1.Pod) *corev1.Pod {
-	config, err := util.GetKubeConfig()
-	if err != nil {
-		return nil
-	}
-	// Create a Kubernetes client
-	clientset, _ := kubernetes.NewForConfig(config)
-	pod, err = clientset.CoreV1().Pods(pod.Namespace).Get(context.TODO(), pod.Name, metav1.GetOptions{})
+func (r *CacheBackupRequestReconciler) GetRuntimePreWarmerPod(pod *corev1.Pod) *corev1.Pod {
+	err := r.Client.Get(context.Background(), client.ObjectKey{Namespace: pod.Namespace, Name: pod.Name}, pod)
 	if err != nil {
 		return nil
 	}
@@ -27,7 +20,10 @@ func GetRuntimePreWarmerPod(pod *corev1.Pod) *corev1.Pod {
 
 // GetNewPreWarmerPod generates pre-warmer pod definition
 func GetNewPreWarmerPod(cr *cachev1beta1.CacheBackupRequest, localHomePVCName string) *corev1.Pod {
-	labels := cr.Spec.PodLabels
+	labels := cr.Spec.PVCLabels
+	if labels == nil {
+		labels = make(map[string]string)
+	}
 	labels["pvc"] = localHomePVCName
 	if labels == nil {
 		labels = make(map[string]string)
@@ -76,6 +72,7 @@ func GetNewPreWarmerPod(cr *cachev1beta1.CacheBackupRequest, localHomePVCName st
 							MountPath: "/opt/script",
 						},
 					},
+					Resources: cr.Spec.PodResources,
 				},
 			},
 			Volumes: []corev1.Volume{
@@ -112,26 +109,18 @@ func GetNewPreWarmerPod(cr *cachev1beta1.CacheBackupRequest, localHomePVCName st
 }
 
 // WatchPodStatus watches a pod and returns its status
-func WatchPodStatus(podName, namespace string) (string, error) {
-	config, err := util.GetKubeConfig()
-	if err != nil {
-		return "", fmt.Errorf("error creating Kubernetes client: %v", err)
-	}
-	// Create a Kubernetes client
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		return "", fmt.Errorf("error creating Kubernetes client: %v", err)
-	}
+func WatchPodStatus(podName, namespace string, clientset kubernetes.Interface, state string) (string, error) {
 
-	// Watch the pod for up to 10 minutes
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	defer cancel()
-	watcher, err := clientset.CoreV1().Pods(namespace).Watch(ctx, metav1.ListOptions{
+	if state != "" {
+		return state, nil
+	}
+	watcher, err := clientset.CoreV1().Pods(namespace).Watch(context.TODO(), metav1.ListOptions{
 		FieldSelector: fmt.Sprintf("metadata.name=%s", podName),
 	})
 	if err != nil {
 		return "", fmt.Errorf("error watching pod: %v", err)
 	}
+	defer watcher.Stop()
 
 	// Wait for the pod status to become available
 	for event := range watcher.ResultChan() {

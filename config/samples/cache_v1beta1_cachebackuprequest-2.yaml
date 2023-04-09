@@ -14,7 +14,7 @@ spec:
   # Pod number in a StatefulSet to pre-warm
   statefulSetNumber: 2
   # How often run the pre-warming job
-  backupIntervalMinutes: 3
+  backupIntervalMinutes: 30
   # ConfigMap with the script that copies/unpacks indexes
   configMapName: copy-index
 
@@ -41,3 +41,8 @@ spec:
     app: confluence-2
   pvcAnnotations:
     app: confluence-2
+
+  podResources:
+    requests:
+      cpu: "1"
+      memory: 1024Mi
