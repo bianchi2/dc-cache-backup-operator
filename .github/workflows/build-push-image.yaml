@@ -32,7 +32,9 @@ jobs:
         run: make
 
       - name: Run unit tests
-        run: go test ./...
+        run: |
+          go clean -testcache 
+          go test ./...
 
       - name: Login to DockerHub
         run: docker login -u eivantsov -p ${DOCKERHUB_PASSWORD}
