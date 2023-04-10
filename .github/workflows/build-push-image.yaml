@@ -1,0 +1,29 @@
+name: Build and Push Operator Image
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+  pull_request_target:
+
+jobs:
+  build_and_push:
+    env:
+      DOCKERHUB_PASSWORD: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Login to DockerHub
+        run: docker login -u eivantsov -p ${DOCKERHUB_PASSWORD}
+
+      - name: Build operator image
+        run: docker build -t eivantsov/index-prewar-operator:0.0.1 --build-arg TARGETARCH=amd64 .
+
+      - name: Push operator image
+        run: docker push eivantsov/index-prewar-operator:0.0.1
