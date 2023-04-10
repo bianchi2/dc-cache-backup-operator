@@ -18,8 +18,6 @@ package controllers
 
 import (
 	cachev1beta1 "bianchi2/dc-cache-backup-operator/api/v1beta1"
-	"bianchi2/dc-cache-backup-operator/k8s"
-	"bianchi2/dc-cache-backup-operator/util"
 	"context"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -73,12 +71,22 @@ func (r *CacheBackupRequestReconciler) Reconcile(ctx context.Context, req ctrl.R
 		return reconcile.Result{}, err
 	}
 
+	if len(instance.Status.LastTransactionTime) > 0 {
+		runBackup, err := isBackupOutdated(instance)
+		if err != nil || !runBackup {
+			return ctrl.Result{RequeueAfter: 1 * time.Minute}, nil
+		}
+	}
+
+	// check if pvc exists and is available
 	pvcName := "local-home-" + instance.Spec.InstanceName + "-" + strconv.Itoa(instance.Spec.StatefulSetNumber)
-	exists, free, err := k8s.IsPVCExistsAndFree(instance, pvcName, r.K8sClient)
+	exists, free, err := IsPVCExistsAndFree(instance, pvcName, r.K8sClient)
+
+	// create PVC if missing
 	if !exists {
 		if instance.Spec.CreatePVC {
 			log.Info("PVC " + pvcName + " does not exist. Creating it because .spec.createPVC is " + strconv.FormatBool(instance.Spec.CreatePVC))
-			pvc := k8s.GetNewPVC(instance, pvcName)
+			pvc := GetNewPVC(instance, pvcName)
 			err = r.Client.Create(ctx, pvc)
 			if err != nil && !errors.IsAlreadyExists(err) {
 				return reconcile.Result{RequeueAfter: 1 * time.Minute}, err
@@ -107,13 +115,6 @@ func (r *CacheBackupRequestReconciler) Reconcile(ctx context.Context, req ctrl.R
 			log.Info("PVC " + pvcName + " is bound to PV that is currently used by a running pod. Waiting 1 minute...")
 			return reconcile.Result{RequeueAfter: 1 * time.Minute}, nil
 
-		}
-	}
-
-	if len(instance.Status.LastTransactionTime) > 0 {
-		runBackup, err := util.IsBackupOutdated(instance)
-		if err != nil || !runBackup {
-			return ctrl.Result{RequeueAfter: 65 * time.Second}, nil
 		}
 	}
 
@@ -185,7 +186,7 @@ func (r *CacheBackupRequestReconciler) Reconcile(ctx context.Context, req ctrl.R
 			if err != nil {
 				return ctrl.Result{RequeueAfter: 1 * time.Second}, err
 			}
-			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+			return ctrl.Result{RequeueAfter: time.Duration(instance.Spec.BackupIntervalMinutes) * time.Minute}, nil
 		}
 
 	// this shouldn't happen - a pod should have at least some status
@@ -193,7 +194,7 @@ func (r *CacheBackupRequestReconciler) Reconcile(ctx context.Context, req ctrl.R
 	case <-time.After(5 * time.Minute):
 		log.Info("Timed out waiting for pod status")
 	}
-	return ctrl.Result{RequeueAfter: 1 * time.Second}, nil
+	return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 }
 
 func (r *CacheBackupRequestReconciler) UpdateStatus(ctx context.Context, req ctrl.Request, status *cachev1beta1.CacheBackupRequestStatus) (err error) {
@@ -213,6 +214,23 @@ func (r *CacheBackupRequestReconciler) UpdateStatus(ctx context.Context, req ctr
 		time.Sleep(1 * time.Second)
 	}
 	return updateErr
+}
+
+func isBackupOutdated(cr *cachev1beta1.CacheBackupRequest) (outdated bool, err error) {
+
+	layout := dateFormatLayout
+	lastTransactionTimeStr := cr.Status.LastTransactionTime
+	lastTransactionTime, err := time.Parse(layout, lastTransactionTimeStr)
+	if err != nil {
+		return false, err
+	}
+	interval := time.Duration(cr.Spec.BackupIntervalMinutes) * time.Minute
+	currentTime := time.Now()
+
+	if cr.Status.Status == "Succeeded" && currentTime.Sub(lastTransactionTime) < (interval) {
+		return false, nil
+	}
+	return true, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

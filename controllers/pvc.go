@@ -1,4 +1,4 @@
-package k8s
+package controllers
 
 import (
 	cachev1beta1 "bianchi2/dc-cache-backup-operator/api/v1beta1"

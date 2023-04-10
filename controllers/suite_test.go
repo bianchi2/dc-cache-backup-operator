@@ -17,7 +17,6 @@ limitations under the License.
 package controllers
 
 import (
-	"bianchi2/dc-cache-backup-operator/k8s"
 	"context"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -222,7 +221,7 @@ func TestRunningSucceededPod(t *testing.T) {
 	res, err := r.Reconcile(ctx, req)
 
 	assert.NoError(t, err)
-	assert.Equal(t, reconcile.Result{RequeueAfter: 1 * time.Second}, res)
+	assert.Equal(t, reconcile.Result{RequeueAfter: 5 * time.Second}, res)
 
 	// Check that the PVC was created.
 	createdPVC := &corev1.PersistentVolumeClaim{}
@@ -311,7 +310,7 @@ func TestRunningSucceededPod(t *testing.T) {
 	res, err = r.Reconcile(ctx, req)
 
 	assert.NoError(t, err)
-	assert.Equal(t, reconcile.Result{RequeueAfter: 30 * time.Second}, res)
+	assert.Equal(t, reconcile.Result{RequeueAfter: time.Duration(instance.Spec.BackupIntervalMinutes) * time.Minute}, res)
 
 	// assert custom resource status has been updated to Succeeded
 	err = fakeClient.Get(ctx, types.NamespacedName{Name: testCustomResourceName, Namespace: namespace}, instance)
@@ -328,7 +327,7 @@ func TestRunningSucceededPod(t *testing.T) {
 	// because BackupIntervalMinutes is set to 1 minute
 	res, err = r.Reconcile(ctx, req)
 	assert.NoError(t, err)
-	assert.Equal(t, reconcile.Result{RequeueAfter: 65 * time.Second}, res)
+	assert.Equal(t, reconcile.Result{RequeueAfter: time.Duration(instance.Spec.BackupIntervalMinutes) * time.Minute}, res)
 
 	// update custom resource status.LastTransactionTime to initiate creation of a new pre-warmer pod
 	// BackupIntervalMinutes is set to 1 minute, so we update the status LastTransactionTime to be 61 seconds behind
@@ -345,7 +344,7 @@ func TestRunningSucceededPod(t *testing.T) {
 	r = &cacheBackupRequestReconcilerPodRunning
 	res, err = r.Reconcile(ctx, req)
 	assert.NoError(t, err)
-	assert.Equal(t, reconcile.Result{RequeueAfter: 1 * time.Second}, res)
+	assert.Equal(t, reconcile.Result{RequeueAfter: 5 * time.Second}, res)
 
 	// Check that the pod was created.
 	createdPod = &corev1.Pod{}
@@ -404,7 +403,7 @@ func TestPVCBeingCurrentlyUsed(t *testing.T) {
 
 	ctx := context.Background()
 
-	existingPVC := k8s.GetNewPVC(sampleBackupRequest, "local-home-"+instanceName+"-"+strconv.Itoa(statefulSetNumberTwo))
+	existingPVC := GetNewPVC(sampleBackupRequest, "local-home-"+instanceName+"-"+strconv.Itoa(statefulSetNumberTwo))
 	err = fakeClient.Create(ctx, existingPVC)
 	assert.NoError(t, err)
 
