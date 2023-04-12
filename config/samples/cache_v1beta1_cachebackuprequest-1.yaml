@@ -15,7 +15,7 @@ spec:
   statefulSetNumber: 1
   # How often run the pre-warming job
   backupIntervalMinutes: 5
-  # ConfigMap with the script that copies/unpacks indexes
+  # ConfigMap in the current namespace with the script that copies/unpacks indexes
   configMapName: copy-index
 
   # shared-home

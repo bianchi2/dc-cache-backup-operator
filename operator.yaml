@@ -1,0 +1,108 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: copy-index
+  namespace: atlassian
+data:
+  copy-index.sh: |-
+    #!/bin/bash
+    
+    unzip_shared_home_index() {
+      rm -rf index/*
+    
+      mkdir -p ${LOCAL_HOME}/index/change ${LOCAL_HOME}/index/edge ${LOCAL_HOME}/journal
+      echo "[INFO]: Creating lock file ${LOCAL_HOME}/index/pre-warmer.lock ..."
+      touch ${LOCAL_HOME}/index/pre-warmer.lock
+    
+      apt-get update && apt-get install unzip -y  
+    
+      unzip -o "${SHARED_HOME}/index-snapshots/IndexSnapshot_main_index_*.zip" -d ${LOCAL_HOME}/index || true
+      unzip -o "${SHARED_HOME}/index-snapshots/IndexSnapshot_change_index_*.zip" -d ${LOCAL_HOME}/index/change || true
+      unzip -o "${SHARED_HOME}/index-snapshots/IndexSnapshot_edge_index_*.zip" -d ${LOCAL_HOME}/index/edge || true
+    
+      # the archive creation timestamp is more recent than file creation timestamps in it
+      # we need to change that so that when pre-warming runs after a successful cycle, and Confluence node wasn't touching the index
+      # "${LOCAL_HOME}/index/segments_*" -ot $(ls ${SHARED_HOME}/index-snapshots/IndexSnapshot_main_index_*.zip) is "false"
+      # otherwise the script will run unzip_shared_home_index without a real need, because the archive is more recent than the files in it
+      # which we compare to make a decision to recover index
+    
+      touch ${LOCAL_HOME}/index/*
+
+      cp ${SHARED_HOME}/index-snapshots/IndexSnapshot_change_index_journal_id ${LOCAL_HOME}/journal/change_index
+      cp ${SHARED_HOME}/index-snapshots/IndexSnapshot_edge_index_journal_id ${LOCAL_HOME}/journal/edge_index
+      cp ${SHARED_HOME}/index-snapshots/IndexSnapshot_main_index_journal_id ${LOCAL_HOME}/journal/main_index
+
+      chown -R confluence:confluence ${LOCAL_HOME}/index
+      chown -R confluence:confluence ${LOCAL_HOME}/journal
+    
+      echo "[INFO]: Deleting lock file ${LOCAL_HOME}/index/pre-warmer.lock ..."
+      rm ${LOCAL_HOME}/index/pre-warmer.lock || true
+    }
+    
+    if [ ! -d "${LOCAL_HOME}/index" ]; then
+    
+      echo "[INFO]: Index directory does not exist in local home. Recovering index from shared-home ..."
+      unzip_shared_home_index
+    
+    elif [[ "${LOCAL_HOME}/index/segments_*" -ot $(ls ${SHARED_HOME}/index-snapshots/IndexSnapshot_main_index_*.zip) ]]; then
+    
+      echo "[INFO]: Current index is older than the one in shared-home. Recovering index from shared-home ..."
+      unzip_shared_home_index
+    
+    else
+      echo "[INFO]: Current index is more recent than the one in shared-home. Nothing to do. Exiting ..."
+    fi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: confluence-pvc-prewarmer-operator
+  labels:
+    k8s-app: confluence-pvc-prewarmer-operator
+spec:
+  selector:
+    matchLabels:
+      k8s-app: confluence-pvc-prewarmer-operator
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        k8s-app: confluence-pvc-prewarmer-operator
+    spec:
+      securityContext:
+        runAsNonRoot: true
+      containers:
+      - command:
+        - /manager
+        args:
+        - --leader-elect
+        image: eivantsov/index-prewar-operator:0.0.1
+        name: operator
+        imagePullPolicy: Always
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - "ALL"
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 500m
+            memory: 128Mi
+          requests:
+            cpu: 10m
+            memory: 64Mi
+      serviceAccountName: index-manager
+      terminationGracePeriodSeconds: 10

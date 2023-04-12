@@ -167,6 +167,12 @@ func (r *CacheBackupRequestReconciler) Reconcile(ctx context.Context, req ctrl.R
 		if status == string(corev1.PodSucceeded) {
 			pod := r.GetRuntimePreWarmerPod(pod)
 			indexRestoreDuration := int(time.Since(pod.ObjectMeta.CreationTimestamp.Time).Seconds())
+
+			// set Skipped status if index restore script skipped unzipping archives because the
+			// current local home index is more recent than what's in shared-home/index-snapshots
+			if indexRestoreDuration < 30 {
+				status = "Skipped"
+			}
 			currentTime := time.Now()
 			// update custom resource status
 			crStatus := &cachev1beta1.CacheBackupRequestStatus{
@@ -227,7 +233,7 @@ func isBackupOutdated(cr *cachev1beta1.CacheBackupRequest) (outdated bool, err e
 	interval := time.Duration(cr.Spec.BackupIntervalMinutes) * time.Minute
 	currentTime := time.Now()
 
-	if cr.Status.Status == "Succeeded" && currentTime.Sub(lastTransactionTime) < (interval) {
+	if cr.Status.Status == "Succeeded" || cr.Status.Status == "Skipped" && currentTime.Sub(lastTransactionTime) < (interval) {
 		return false, nil
 	}
 	return true, nil
