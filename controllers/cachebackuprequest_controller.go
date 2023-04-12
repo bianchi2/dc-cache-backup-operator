@@ -233,7 +233,7 @@ func isBackupOutdated(cr *cachev1beta1.CacheBackupRequest) (outdated bool, err e
 	interval := time.Duration(cr.Spec.BackupIntervalMinutes) * time.Minute
 	currentTime := time.Now()
 
-	if cr.Status.Status == "Succeeded" || cr.Status.Status == "Skipped" && currentTime.Sub(lastTransactionTime) < (interval) {
+	if (cr.Status.Status == "Succeeded" || cr.Status.Status == "Skipped") && currentTime.Sub(lastTransactionTime) < (interval) {
 		return false, nil
 	}
 	return true, nil
