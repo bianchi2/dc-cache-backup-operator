@@ -24,7 +24,7 @@ func GetNewPVC(cr *cachev1beta1.CacheBackupRequest, localHomePVCName string) *co
 	labels["app.kubernetes.io/instance"] = cr.Spec.InstanceName
 	labels["app.kubernetes.io/name"] = cr.Spec.InstanceName
 
-	return &corev1.PersistentVolumeClaim{
+	pvc := &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        localHomePVCName,
 			Namespace:   cr.Namespace,
@@ -40,12 +40,22 @@ func GetNewPVC(cr *cachev1beta1.CacheBackupRequest, localHomePVCName string) *co
 					corev1.ResourceStorage: resource.MustParse(cr.Spec.PvcStorageRequest),
 				},
 			},
-			StorageClassName: &cr.Spec.PvcStorageClass,
-			Selector:         &cr.Spec.PvcLabelSelector,
-			VolumeName:       cr.Spec.PvcVolumeName,
-			VolumeMode:       pcvVolumeMode,
 		},
 	}
+
+	if cr.Spec.PvcStorageClass != "" {
+		pvc.Spec.StorageClassName = &cr.Spec.PvcStorageClass
+	}
+
+	// Conditionally include Selector field
+	if cr.Spec.PvcLabelSelector.MatchLabels != nil {
+		pvc.Spec.Selector = &cr.Spec.PvcLabelSelector
+	}
+	if cr.Spec.PvcVolumeName != "" {
+		pvc.Spec.VolumeName = cr.Spec.PvcVolumeName
+	}
+	pvc.Spec.VolumeMode = pcvVolumeMode
+	return pvc
 }
 
 // IsPVCExistsAndFree returns PVC by name
