@@ -281,6 +281,12 @@ func TestRunningSucceededPod(t *testing.T) {
 	assert.True(t, exists)
 	assert.Equal(t, "bar", value)
 
+	// check if PVC has got expected label selector in spec
+	pvcLabelSelectorMatchLabels := createdPVC.Spec.Selector.MatchLabels
+	value, exists = pvcLabelSelectorMatchLabels["foo"]
+	assert.True(t, exists)
+	assert.Equal(t, "bar", value)
+
 	// check if PVC has got expected annotations
 	pvcAnnotations := createdPVC.Annotations
 	value, exists = pvcAnnotations["foo"]
