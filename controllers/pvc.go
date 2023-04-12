@@ -11,6 +11,11 @@ import (
 )
 
 func GetNewPVC(cr *cachev1beta1.CacheBackupRequest, localHomePVCName string) *corev1.PersistentVolumeClaim {
+	pcvVolumeMode := (*corev1.PersistentVolumeMode)(&cr.Spec.PvcVolumeMode)
+	volumeMode := cr.Spec.PvcVolumeMode
+	if volumeMode == "" {
+		pcvVolumeMode = nil
+	}
 
 	labels := cr.Spec.PVCLabels
 	if labels == nil {
@@ -38,7 +43,7 @@ func GetNewPVC(cr *cachev1beta1.CacheBackupRequest, localHomePVCName string) *co
 			StorageClassName: &cr.Spec.PvcStorageClass,
 			Selector:         &cr.Spec.PvcLabelSelector,
 			VolumeName:       cr.Spec.PvcVolumeName,
-			VolumeMode:       (*corev1.PersistentVolumeMode)(&cr.Spec.PvcVolumeMode),
+			VolumeMode:       pcvVolumeMode,
 		},
 	}
 }

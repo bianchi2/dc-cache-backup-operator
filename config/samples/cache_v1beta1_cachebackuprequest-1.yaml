@@ -14,7 +14,7 @@ spec:
   # Pod number in a StatefulSet to pre-warm
   statefulSetNumber: 1
   # How often run the pre-warming job
-  backupIntervalMinutes: 20
+  backupIntervalMinutes: 5
   # ConfigMap with the script that copies/unpacks indexes
   configMapName: copy-index
 
@@ -26,7 +26,10 @@ spec:
   localHomePath: /var/atlassian/application-data/confluence
 
   # create PVC if missing
-  createPVC: false
+  createPVC: true
+
+  # PVC request in Gi
+  pvcStorageRequest: 200Gi
 
   # k8s
   podLabels:
